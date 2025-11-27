@@ -1,3 +1,4 @@
+// Package aerospike provides a testcontainer for Aerospike database.
 package aerospike
 
 import (
@@ -13,12 +14,13 @@ const (
 	enterpriseAerospikeImage = "aerospike/aerospike-server-enterprise:8.0"
 )
 
-type AerospikeContainer struct {
+// Container represents a running Aerospike container.
+type Container struct {
 	testcontainers.Container
 }
 
 // RunContainer creates an instance of the Aerospike container type.
-func RunContainer(ctx context.Context, opts ...testcontainers.ContainerCustomizer) (*AerospikeContainer, error) {
+func RunContainer(ctx context.Context, opts ...testcontainers.ContainerCustomizer) (*Container, error) {
 	containerRequest := testcontainers.ContainerRequest{
 		Image:        communityAerospikeImage,
 		ExposedPorts: []string{"3000/tcp"},
@@ -41,12 +43,12 @@ func RunContainer(ctx context.Context, opts ...testcontainers.ContainerCustomize
 		return nil, fmt.Errorf("failed to start Aerospike: %w", err)
 	}
 
-	return &AerospikeContainer{Container: container}, nil
+	return &Container{Container: container}, nil
 }
 
-// Port returns the port on which the Aerospike container is listening.
-func (c AerospikeContainer) ServicePort(ctx context.Context) (int, error) {
-	port, err := c.Container.MappedPort(ctx, aerospikeServicePort)
+// ServicePort returns the port on which the Aerospike container is listening.
+func (c Container) ServicePort(ctx context.Context) (int, error) {
+	port, err := c.MappedPort(ctx, aerospikeServicePort)
 	if err != nil {
 		return 0, err
 	}
@@ -58,7 +60,7 @@ func WithImage(image string) testcontainers.CustomizeRequestOption {
 	return testcontainers.WithImage(image)
 }
 
-// WithEnterpriseEdition() sets the image to the enterprise edition of Aerospike.
+// WithEnterpriseEdition sets the image to the enterprise edition of Aerospike.
 func WithEnterpriseEdition() testcontainers.CustomizeRequestOption {
 	return WithImage(enterpriseAerospikeImage)
 }
@@ -76,6 +78,7 @@ func WithNamespace(namespace string) testcontainers.CustomizeRequestOption {
 	}
 }
 
+// WithLogLevel sets the log level for the Aerospike container.
 func WithLogLevel(logLevel string) testcontainers.CustomizeRequestOption {
 	return func(req *testcontainers.GenericContainerRequest) error {
 		if req.Env == nil {

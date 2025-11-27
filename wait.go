@@ -23,7 +23,7 @@ func newAerospikeWaitStrategy() aerospikeWaitStrategy {
 	return aerospikeWaitStrategy{}
 }
 
-func (s aerospikeWaitStrategy) WaitUntilReady(ctx context.Context, target wait.StrategyTarget) (err error) {
+func (s aerospikeWaitStrategy) WaitUntilReady(ctx context.Context, target wait.StrategyTarget) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultStartupTimeout)
 	defer cancel()
 
@@ -66,9 +66,8 @@ func (s aerospikeWaitStrategy) isReady(host string, port int) (bool, error) {
 	if err != nil {
 		if err.Matches(types.INVALID_NODE_ERROR) {
 			return false, nil
-		} else {
-			return false, fmt.Errorf("failed to connect to Aerospike: %w", err)
 		}
+		return false, fmt.Errorf("failed to connect to Aerospike: %w", err)
 	}
 	defer client.Close()
 	return client.IsConnected(), nil
