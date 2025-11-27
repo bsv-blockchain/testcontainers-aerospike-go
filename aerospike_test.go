@@ -218,3 +218,30 @@ func TestPutWithEnterprise(t *testing.T) {
 		require.ErrorIs(t, err, aerospike.ErrKeyNotFound)
 	})
 }
+
+// Fuzz tests
+
+func FuzzWithNamespace(f *testing.F) {
+	// Seed corpus with edge cases
+	f.Add("")
+	f.Add("test")
+	f.Add("namespace-with-dashes")
+	f.Add("namespace_with_underscores")
+	f.Add("\u540d\u524d\u7a7a\u9593")
+	f.Add(strings.Repeat("a", 1000))
+	f.Add("namespace\x00with\x00nulls")
+	f.Add("namespace\nwith\nnewlines")
+	f.Add("namespace\twith\ttabs")
+	f.Add(" leading-and-trailing-spaces ")
+	f.Add("UPPERCASE")
+	f.Add("MixedCase123")
+
+	f.Fuzz(func(t *testing.T, namespace string) {
+		req := &testcontainers.GenericContainerRequest{}
+		opt := WithNamespace(namespace)
+
+		err := opt.Customize(req)
+		require.NoError(t, err)
+		assert.Equal(t, namespace, req.Env["NAMESPACE"])
+	})
+}
