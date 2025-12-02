@@ -55,6 +55,27 @@ func TestWithEnterpriseEditionOption(t *testing.T) {
 	assert.Equal(t, "aerospike/aerospike-server-enterprise:8.0", req.Image)
 }
 
+func TestWithTTLSupportOption(t *testing.T) {
+	req := &testcontainers.GenericContainerRequest{}
+	opt := WithTTLSupport("test")
+
+	err := opt.Customize(req)
+	require.NoError(t, err)
+
+	assert.Len(t, req.LifecycleHooks, 1)
+	assert.Len(t, req.LifecycleHooks[0].PostStarts, 1)
+}
+
+func TestWithTTLSupportOptionDefaultNamespace(t *testing.T) {
+	req := &testcontainers.GenericContainerRequest{}
+	opt := WithTTLSupport("") // empty should default to "test"
+
+	err := opt.Customize(req)
+	require.NoError(t, err)
+
+	assert.Len(t, req.LifecycleHooks, 1)
+}
+
 // skipIfDockerNotAvailable skips the test if Docker daemon is not available.
 func skipIfDockerNotAvailable(t *testing.T) {
 	t.Helper()
@@ -144,6 +165,47 @@ func TestWithLogLevel(t *testing.T) {
 	client, err := aerospike.NewClient(host, port)
 	require.NoErrorf(t, err, "failed to initialize Aerospike client")
 	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+}
+
+func TestWithTTLSupport(t *testing.T) {
+	skipIfDockerNotAvailable(t)
+
+	ctx := context.Background()
+
+	container, err := RunContainer(ctx, WithTTLSupport("test"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
+	})
+
+	host, err := container.Host(ctx)
+	require.NoErrorf(t, err, "failed to fetch Aerospike host")
+	port, err := container.ServicePort(ctx)
+	require.NoErrorf(t, err, "failed to fetch Aerospike port")
+
+	client, err := aerospike.NewClient(host, port)
+	require.NoErrorf(t, err, "failed to initialize Aerospike client")
+	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+
+	t.Run("Write with explicit TTL succeeds", func(t *testing.T) {
+		policy := aerospike.NewWritePolicy(0, 30) // 30 seconds TTL
+		key, err := aerospike.NewKey("test", "set", "ttl-key")
+		require.NoErrorf(t, err, "failed to create Aerospike key")
+
+		bin := aerospike.NewBin("bin", "value")
+		err = client.PutBins(policy, key, bin)
+		require.NoErrorf(t, err, "write with explicit TTL should succeed when TTL support is enabled")
+	})
+
+	t.Run("Write with TTLDontExpire succeeds", func(t *testing.T) {
+		policy := aerospike.NewWritePolicy(0, aerospike.TTLDontExpire)
+		key, err := aerospike.NewKey("test", "set", "no-ttl-key")
+		require.NoErrorf(t, err, "failed to create Aerospike key")
+
+		bin := aerospike.NewBin("bin", "value")
+		err = client.PutBins(policy, key, bin)
+		require.NoErrorf(t, err, "write with TTLDontExpire should succeed")
+	})
 }
 
 func TestPutWithEnterprise(t *testing.T) {

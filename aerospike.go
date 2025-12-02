@@ -89,3 +89,24 @@ func WithLogLevel(logLevel string) testcontainers.CustomizeRequestOption {
 		return nil
 	}
 }
+
+// WithTTLSupport enables TTL (time-to-live) support for records by setting nsup-period.
+// This is required for records with explicit TTL values to expire properly.
+// The namespace parameter specifies which namespace to configure (default: "test").
+func WithTTLSupport(namespace string) testcontainers.CustomizeRequestOption {
+	if namespace == "" {
+		namespace = "test"
+	}
+	return func(req *testcontainers.GenericContainerRequest) error {
+		req.LifecycleHooks = append(req.LifecycleHooks, testcontainers.ContainerLifecycleHooks{
+			PostStarts: []testcontainers.ContainerHook{
+				func(ctx context.Context, c testcontainers.Container) error {
+					cmd := []string{"asinfo", "-v", fmt.Sprintf("set-config:context=namespace;id=%s;nsup-period=10", namespace)}
+					_, _, err := c.Exec(ctx, cmd)
+					return err
+				},
+			},
+		})
+		return nil
+	}
+}
