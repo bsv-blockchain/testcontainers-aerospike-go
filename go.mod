@@ -1,4 +1,4 @@
-module github.com/bitcoin-sv/testcontainers-aerospike-go
+module github.com/bsv-blockchain/testcontainers-aerospike-go
 
 go 1.24.0
 
