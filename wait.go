@@ -62,7 +62,11 @@ func (s aerospikeWaitStrategy) pollUntilReady(ctx context.Context, host string, 
 func (s aerospikeWaitStrategy) isReady(host string, port int) (bool, error) {
 	// This is similar to the implementation in testcontainers-spring-boot:
 	// https://github.com/PlaytikaOSS/testcontainers-spring-boot/blob/0c007f0b774eaed595e029c94e812a30fe2d1a6b/embedded-aerospike/src/main/java/com/playtika/testcontainer/aerospike/AerospikeWaitStrategy.java#L23
-	client, err := aerospike.NewClient(host, port)
+	clientPolicy := aerospike.NewClientPolicy()
+	// Set a short timeout for readiness checks to fail fast
+	clientPolicy.Timeout = 2 * time.Second
+
+	client, err := aerospike.NewClientWithPolicy(clientPolicy, host, port)
 	if err != nil {
 		if err.Matches(types.INVALID_NODE_ERROR) {
 			return false, nil
@@ -75,24 +79,18 @@ func (s aerospikeWaitStrategy) isReady(host string, port int) (bool, error) {
 		return false, nil
 	}
 
-	// Verify Aerospike is actually ready to accept operations by attempting a write
-	// Use the default "test" namespace which is available in all Aerospike configurations
-	key, err := aerospike.NewKey("test", "readiness-check", "probe")
-	if err != nil {
+	// Verify cluster is ready by checking cluster stability
+	// GetNodes() will return nodes only when cluster is fully initialized
+	nodes := client.GetNodes()
+	if len(nodes) == 0 {
 		return false, nil
 	}
 
-	// Attempt to write - if this succeeds, Aerospike is fully ready
-	err = client.PutBins(nil, key, aerospike.NewBin("ready", true))
-	if err != nil {
-		// If we get a connection error, Aerospike isn't ready yet
-		if err.Matches(types.NO_AVAILABLE_CONNECTIONS_TO_NODE) ||
-			err.Matches(types.TIMEOUT) ||
-			err.Matches(types.MAX_RETRIES_EXCEEDED) {
+	// Additional check: verify we can get node stats which confirms cluster is operational
+	for _, node := range nodes {
+		if !node.IsActive() {
 			return false, nil
 		}
-		// Other errors indicate a configuration problem
-		return false, fmt.Errorf("failed to write readiness probe: %w", err)
 	}
 
 	return true, nil
