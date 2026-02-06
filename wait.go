@@ -70,5 +70,30 @@ func (s aerospikeWaitStrategy) isReady(host string, port int) (bool, error) {
 		return false, fmt.Errorf("failed to connect to Aerospike: %w", err)
 	}
 	defer client.Close()
-	return client.IsConnected(), nil
+
+	if !client.IsConnected() {
+		return false, nil
+	}
+
+	// Verify Aerospike is actually ready to accept operations by attempting a write
+	// Use the default "test" namespace which is available in all Aerospike configurations
+	key, err := aerospike.NewKey("test", "readiness-check", "probe")
+	if err != nil {
+		return false, nil
+	}
+
+	// Attempt to write - if this succeeds, Aerospike is fully ready
+	err = client.PutBins(nil, key, aerospike.NewBin("ready", true))
+	if err != nil {
+		// If we get a connection error, Aerospike isn't ready yet
+		if err.Matches(types.NO_AVAILABLE_CONNECTIONS_TO_NODE) ||
+			err.Matches(types.TIMEOUT) ||
+			err.Matches(types.MAX_RETRIES_EXCEEDED) {
+			return false, nil
+		}
+		// Other errors indicate a configuration problem
+		return false, fmt.Errorf("failed to write readiness probe: %w", err)
+	}
+
+	return true, nil
 }
