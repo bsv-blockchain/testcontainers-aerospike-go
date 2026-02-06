@@ -62,7 +62,11 @@ func (s aerospikeWaitStrategy) pollUntilReady(ctx context.Context, host string, 
 func (s aerospikeWaitStrategy) isReady(host string, port int) (bool, error) {
 	// This is similar to the implementation in testcontainers-spring-boot:
 	// https://github.com/PlaytikaOSS/testcontainers-spring-boot/blob/0c007f0b774eaed595e029c94e812a30fe2d1a6b/embedded-aerospike/src/main/java/com/playtika/testcontainer/aerospike/AerospikeWaitStrategy.java#L23
-	client, err := aerospike.NewClient(host, port)
+	clientPolicy := aerospike.NewClientPolicy()
+	// Set a short timeout for readiness checks to fail fast
+	clientPolicy.Timeout = 2 * time.Second
+
+	client, err := aerospike.NewClientWithPolicy(clientPolicy, host, port)
 	if err != nil {
 		if err.Matches(types.INVALID_NODE_ERROR) {
 			return false, nil
@@ -70,5 +74,24 @@ func (s aerospikeWaitStrategy) isReady(host string, port int) (bool, error) {
 		return false, fmt.Errorf("failed to connect to Aerospike: %w", err)
 	}
 	defer client.Close()
-	return client.IsConnected(), nil
+
+	if !client.IsConnected() {
+		return false, nil
+	}
+
+	// Verify cluster is ready by checking cluster stability
+	// GetNodes() will return nodes only when cluster is fully initialized
+	nodes := client.GetNodes()
+	if len(nodes) == 0 {
+		return false, nil
+	}
+
+	// Additional check: verify we can get node stats which confirms cluster is operational
+	for _, node := range nodes {
+		if !node.IsActive() {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
