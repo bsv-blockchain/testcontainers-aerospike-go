@@ -39,7 +39,7 @@ func (s aerospikeWaitStrategy) WaitUntilReady(ctx context.Context, target wait.S
 	if err != nil {
 		return fmt.Errorf("failed to fetch port: %w", err)
 	}
-	return s.pollUntilReady(ctx, host, port.Int())
+	return s.pollUntilReady(ctx, host, int(port.Num()))
 }
 
 func (s aerospikeWaitStrategy) pollUntilReady(ctx context.Context, host string, port int) error {

@@ -52,7 +52,7 @@ func (c Container) ServicePort(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return port.Int(), nil
+	return int(port.Num()), nil
 }
 
 // WithImage sets the image for the Aerospike container.
