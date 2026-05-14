@@ -43,7 +43,7 @@ Go library for **[Aerospike](https://aerospike.com/) integration testing via [Te
     </td>
     <td align="left">
        <a href="https://github.com/bsv-blockchain/testcontainers-aerospike-go/graphs/contributors"><img src="https://img.shields.io/github/contributors/bsv-blockchain/testcontainers-aerospike-go?style=flat-square&color=orange" alt="Contributors"></a>
-       <a href="https://github.com/sponsors/bsv-blockchain"><img src="https://img.shields.io/badge/sponsor-BSV-181717.svg?logo=github&style=flat-square" alt="Sponsor"></a>
+       <a href="https://deepwiki.com/bsv-blockchain/testcontainers-aerospike-go"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
     </td>
   </tr>
 </table>
