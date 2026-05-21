@@ -80,7 +80,7 @@ func TestWithTTLSupportOptionDefaultNamespace(t *testing.T) {
 func skipIfDockerNotAvailable(t *testing.T) {
 	t.Helper()
 
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		t.Skipf("Docker client creation failed: %v", err)
 		return
