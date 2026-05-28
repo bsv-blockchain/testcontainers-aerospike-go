@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aerospike/aerospike-client-go/v8"
+	"github.com/bsv-blockchain/aerospike-client-go/v8"
 	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,6 +53,30 @@ func TestWithEnterpriseEditionOption(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "aerospike/aerospike-server-enterprise:8.0", req.Image)
+}
+
+func TestWithPortOption(t *testing.T) {
+	req := &testcontainers.GenericContainerRequest{}
+	opt := WithPort("4000/tcp")
+
+	err := opt.Customize(req)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"4000/tcp"}, req.ExposedPorts)
+}
+
+func TestWithPortOptionOverridesExisting(t *testing.T) {
+	req := &testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			ExposedPorts: []string{"3000/tcp"},
+		},
+	}
+	opt := WithPort("4000/tcp")
+
+	err := opt.Customize(req)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"4000/tcp"}, req.ExposedPorts)
 }
 
 func TestWithTTLSupportOption(t *testing.T) {

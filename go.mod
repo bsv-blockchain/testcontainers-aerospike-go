@@ -3,7 +3,7 @@ module github.com/bsv-blockchain/testcontainers-aerospike-go
 go 1.25.0
 
 require (
-	github.com/aerospike/aerospike-client-go/v8 v8.7.0
+	github.com/bsv-blockchain/aerospike-client-go/v8 v8.7.1-bsv3
 	github.com/moby/moby/client v0.4.1
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0

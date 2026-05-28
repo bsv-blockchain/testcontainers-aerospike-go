@@ -65,6 +65,14 @@ func WithEnterpriseEdition() testcontainers.CustomizeRequestOption {
 	return WithImage(enterpriseAerospikeImage)
 }
 
+// WithPort sets the port for the Aerospike container.
+func WithPort(port string) testcontainers.CustomizeRequestOption {
+	return func(req *testcontainers.GenericContainerRequest) error {
+		req.ExposedPorts = []string{port}
+		return nil
+	}
+}
+
 // WithNamespace sets the default namespace that is created when Aerospike
 // starts. By default, this is set to "test".
 func WithNamespace(namespace string) testcontainers.CustomizeRequestOption {
