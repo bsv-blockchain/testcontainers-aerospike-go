@@ -120,13 +120,75 @@ func skipIfDockerNotAvailable(t *testing.T) {
 	}
 }
 
+// isTransientStartError reports whether err looks like a transient
+// infrastructure failure pulling the image (e.g. Docker Hub timeouts or rate
+// limits) rather than a real defect. These regularly cause spurious CI failures
+// when the registry is slow or throttling, even though the container would
+// start fine on retry.
+func isTransientStartError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	transient := []string{
+		"Client.Timeout",           // net/http client timeout (registry manifest fetch)
+		"request canceled",         // context/transport cancellation during pull
+		"i/o timeout",              // network timeout reaching the registry
+		"TLS handshake timeout",    // slow registry TLS negotiation
+		"connection reset by peer", // dropped connection mid-pull
+		"registry-1.docker.io",     // Docker Hub registry endpoint errors
+		"auth.docker.io",           // Docker Hub auth endpoint errors
+		"toomanyrequests",          // Docker Hub rate limiting
+		"no such host",             // transient DNS resolution failure
+	}
+
+	msg := err.Error()
+	for _, s := range transient {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// startContainer starts an Aerospike container, retrying a few times when the
+// failure is a transient registry/image-pull error. It fails the test on any
+// non-transient error or once retries are exhausted.
+func startContainer(ctx context.Context, t *testing.T, opts ...testcontainers.ContainerCustomizer) *Container {
+	t.Helper()
+
+	const maxAttempts = 3
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		container, err := RunContainer(ctx, opts...)
+		if err == nil {
+			return container
+		}
+
+		lastErr = err
+		if !isTransientStartError(err) {
+			break
+		}
+
+		t.Logf("transient error starting Aerospike container (attempt %d/%d): %v", attempt, maxAttempts, err)
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+	}
+
+	require.NoError(t, lastErr, "failed to start Aerospike container")
+
+	return nil
+}
+
 func TestPut(t *testing.T) {
 	skipIfDockerNotAvailable(t)
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithNamespace("namespace"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithNamespace("namespace"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -154,8 +216,7 @@ func TestWithImage(t *testing.T) {
 	ctx := context.Background()
 
 	customImage := "aerospike/aerospike-server:7.2"
-	container, err := RunContainer(ctx, WithImage(customImage), WithNamespace("test"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithImage(customImage), WithNamespace("test"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -175,8 +236,7 @@ func TestWithLogLevel(t *testing.T) {
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithNamespace("test"), WithLogLevel("debug"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithNamespace("test"), WithLogLevel("debug"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -196,8 +256,7 @@ func TestWithTTLSupport(t *testing.T) {
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithTTLSupport("test"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithTTLSupport("test"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -237,8 +296,7 @@ func TestPutWithEnterprise(t *testing.T) {
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithNamespace("namespace"), WithEnterpriseEdition())
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithNamespace("namespace"), WithEnterpriseEdition())
 
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
