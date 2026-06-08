@@ -183,6 +183,24 @@ func startContainer(ctx context.Context, t *testing.T, opts ...testcontainers.Co
 	return nil
 }
 
+// newAerospikeClient connects an Aerospike client to host:port, fails the test
+// if it cannot connect, and registers a cleanup that closes the client.
+//
+// The explicit Close (via t.Cleanup) tears the cluster down deterministically.
+// Without it, the client's GC finalizer calls Close at an arbitrary time, which
+// races with in-flight operations on the partition table and can rip the
+// connection pool out from under a live command (caught by the -race detector).
+func newAerospikeClient(t *testing.T, host string, port int) *aerospike.Client {
+	t.Helper()
+
+	client, err := aerospike.NewClient(host, port)
+	require.NoErrorf(t, err, "failed to initialize Aerospike client")
+	t.Cleanup(client.Close)
+	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+
+	return client
+}
+
 func TestPut(t *testing.T) {
 	skipIfDockerNotAvailable(t)
 
@@ -198,9 +216,7 @@ func TestPut(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	client := newAerospikeClient(t, host, port)
 
 	key, err := aerospike.NewKey("namespace", "set", "key")
 	require.NoErrorf(t, err, "failed to create Aerospike key")
@@ -226,9 +242,8 @@ func TestWithImage(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	// newAerospikeClient fails the test if the client cannot connect.
+	newAerospikeClient(t, host, port)
 }
 
 func TestWithLogLevel(t *testing.T) {
@@ -246,9 +261,8 @@ func TestWithLogLevel(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	// newAerospikeClient fails the test if the client cannot connect.
+	newAerospikeClient(t, host, port)
 }
 
 func TestWithTTLSupport(t *testing.T) {
@@ -266,9 +280,7 @@ func TestWithTTLSupport(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	client := newAerospikeClient(t, host, port)
 
 	t.Run("Write with explicit TTL succeeds", func(t *testing.T) {
 		policy := aerospike.NewWritePolicy(0, 30) // 30 seconds TTL
@@ -308,9 +320,7 @@ func TestPutWithEnterprise(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	client := newAerospikeClient(t, host, port)
 
 	t.Run("Put", func(t *testing.T) {
 		key, err := aerospike.NewKey("namespace", "set", "key1")
