@@ -120,13 +120,93 @@ func skipIfDockerNotAvailable(t *testing.T) {
 	}
 }
 
+// isTransientStartError reports whether err looks like a transient
+// infrastructure failure pulling the image (e.g. Docker Hub timeouts or rate
+// limits) rather than a real defect. These regularly cause spurious CI failures
+// when the registry is slow or throttling, even though the container would
+// start fine on retry.
+func isTransientStartError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	transient := []string{
+		"Client.Timeout",           // net/http client timeout (registry manifest fetch)
+		"request canceled",         // context/transport cancellation during pull
+		"i/o timeout",              // network timeout reaching the registry
+		"TLS handshake timeout",    // slow registry TLS negotiation
+		"connection reset by peer", // dropped connection mid-pull
+		"registry-1.docker.io",     // Docker Hub registry endpoint errors
+		"auth.docker.io",           // Docker Hub auth endpoint errors
+		"toomanyrequests",          // Docker Hub rate limiting
+		"no such host",             // transient DNS resolution failure
+	}
+
+	msg := err.Error()
+	for _, s := range transient {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// startContainer starts an Aerospike container, retrying a few times when the
+// failure is a transient registry/image-pull error. It fails the test on any
+// non-transient error or once retries are exhausted.
+func startContainer(ctx context.Context, t *testing.T, opts ...testcontainers.ContainerCustomizer) *Container {
+	t.Helper()
+
+	const maxAttempts = 3
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		container, err := RunContainer(ctx, opts...)
+		if err == nil {
+			return container
+		}
+
+		lastErr = err
+		if !isTransientStartError(err) {
+			break
+		}
+
+		t.Logf("transient error starting Aerospike container (attempt %d/%d): %v", attempt, maxAttempts, err)
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+	}
+
+	require.NoError(t, lastErr, "failed to start Aerospike container")
+
+	return nil
+}
+
+// newAerospikeClient connects an Aerospike client to host:port, fails the test
+// if it cannot connect, and registers a cleanup that closes the client.
+//
+// The explicit Close (via t.Cleanup) tears the cluster down deterministically.
+// Without it, the client's GC finalizer calls Close at an arbitrary time, which
+// races with in-flight operations on the partition table and can rip the
+// connection pool out from under a live command (caught by the -race detector).
+func newAerospikeClient(t *testing.T, host string, port int) *aerospike.Client {
+	t.Helper()
+
+	client, err := aerospike.NewClient(host, port)
+	require.NoErrorf(t, err, "failed to initialize Aerospike client")
+	t.Cleanup(client.Close)
+	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+
+	return client
+}
+
 func TestPut(t *testing.T) {
 	skipIfDockerNotAvailable(t)
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithNamespace("namespace"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithNamespace("namespace"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -136,9 +216,7 @@ func TestPut(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	client := newAerospikeClient(t, host, port)
 
 	key, err := aerospike.NewKey("namespace", "set", "key")
 	require.NoErrorf(t, err, "failed to create Aerospike key")
@@ -154,8 +232,7 @@ func TestWithImage(t *testing.T) {
 	ctx := context.Background()
 
 	customImage := "aerospike/aerospike-server:7.2"
-	container, err := RunContainer(ctx, WithImage(customImage), WithNamespace("test"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithImage(customImage), WithNamespace("test"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -165,9 +242,8 @@ func TestWithImage(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	// newAerospikeClient fails the test if the client cannot connect.
+	newAerospikeClient(t, host, port)
 }
 
 func TestWithLogLevel(t *testing.T) {
@@ -175,8 +251,7 @@ func TestWithLogLevel(t *testing.T) {
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithNamespace("test"), WithLogLevel("debug"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithNamespace("test"), WithLogLevel("debug"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -186,9 +261,8 @@ func TestWithLogLevel(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	// newAerospikeClient fails the test if the client cannot connect.
+	newAerospikeClient(t, host, port)
 }
 
 func TestWithTTLSupport(t *testing.T) {
@@ -196,8 +270,7 @@ func TestWithTTLSupport(t *testing.T) {
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithTTLSupport("test"))
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithTTLSupport("test"))
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
 	})
@@ -207,9 +280,7 @@ func TestWithTTLSupport(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	client := newAerospikeClient(t, host, port)
 
 	t.Run("Write with explicit TTL succeeds", func(t *testing.T) {
 		policy := aerospike.NewWritePolicy(0, 30) // 30 seconds TTL
@@ -237,8 +308,7 @@ func TestPutWithEnterprise(t *testing.T) {
 
 	ctx := context.Background()
 
-	container, err := RunContainer(ctx, WithNamespace("namespace"), WithEnterpriseEdition())
-	require.NoError(t, err)
+	container := startContainer(ctx, t, WithNamespace("namespace"), WithEnterpriseEdition())
 
 	t.Cleanup(func() {
 		require.NoErrorf(t, container.Terminate(ctx), "failed to terminate Aerospike container")
@@ -250,9 +320,7 @@ func TestPutWithEnterprise(t *testing.T) {
 	port, err := container.ServicePort(ctx)
 	require.NoErrorf(t, err, "failed to fetch Aerospike port")
 
-	client, err := aerospike.NewClient(host, port)
-	require.NoErrorf(t, err, "failed to initialize Aerospike client")
-	require.Truef(t, client.IsConnected(), "failed to connect to Aerospike")
+	client := newAerospikeClient(t, host, port)
 
 	t.Run("Put", func(t *testing.T) {
 		key, err := aerospike.NewKey("namespace", "set", "key1")
